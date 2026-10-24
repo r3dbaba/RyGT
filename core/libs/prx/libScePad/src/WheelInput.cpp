@@ -371,6 +371,14 @@ bool WheelInput::Update() {
                 continue;
             }
             if (!entry.device->restCaptured) continue;
+            if (Pad::IsDpad(binding.button)) {
+                const int delta = value - entry.device->rest[binding.axis];
+                const int travel = binding.invert ? -delta : delta;
+                // Analog stick used as dpad. Count it as pressed once if it travels a third of the full
+                // distance (10000 of ~32767).
+                if (travel > 10000) next.buttons |= static_cast<std::uint32_t>(binding.button);
+                continue;
+            }
             const auto amount = static_cast<std::uint16_t>(std::lround(pedalAmount(value, entry.device->rest[binding.axis], binding.invert) * 65535.0f));
             if (binding.control == Pad::InputControl::Throttle) next.throttle = std::max(next.throttle, amount);
             if (binding.control == Pad::InputControl::Brake) next.brake = std::max(next.brake, amount);

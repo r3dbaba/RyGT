@@ -49,6 +49,10 @@ enum class PadButton : std::uint32_t {
     TouchPad = 0x100000
 };
 
+inline bool IsDpad(PadButton button) {
+    return button == PadButton::Up || button == PadButton::Right || button == PadButton::Down || button == PadButton::Left;
+}
+
 enum class MouseButton : std::uint8_t {
     None = 0,
     Left = SDL_BUTTON_LEFT,

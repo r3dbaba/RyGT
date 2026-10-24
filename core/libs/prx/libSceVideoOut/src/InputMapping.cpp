@@ -125,7 +125,9 @@ Pad::JoystickBinding parseJoystickBinding(const InputAction& action, const std::
         value = trim(value.substr(0, at));
     }
     if (type == "JOYAXIS") {
-        if (!isAnalog(action.control)) throw std::runtime_error("JOYAXIS can only map to Steering, Throttle, Brake or Clutch");
+        if (!isAnalog(action.control) && !Pad::IsDpad(action.button)) {
+            throw std::runtime_error("JOYAXIS can only map to Steering, Throttle, Brake, Clutch or a dpad direction");
+        }
         if (const auto colon = value.find(':'); colon != std::string_view::npos) {
             if (upper(trim(value.substr(colon + 1))) != "INVERT") throw std::runtime_error("axis option must be INVERT");
             binding.invert = true;
