@@ -37,9 +37,11 @@ namespace RyGT
             public bool Analog;
             public string Source;        // "JOYAXIS:1", "JOYBUTTON:13", "JOYHAT:UP" or null
             public string DeviceName;    // null: the wheel
+            public string OwnedLine;     // the ini line loaded into this row; null: no line
             public bool Invert;
             public Label Value;
             public DarkBar Bar;
+            public Control InvertCell;   // always-visible cell holder; the invisible checkbox does not take a table cell
             public CheckBox InvertBox;
             public Button Detect;
         }
@@ -65,6 +67,10 @@ namespace RyGT
             new Row { Action = "R2", Label = "R2" },
             new Row { Action = "L3", Label = "L3" },
             new Row { Action = "R3", Label = "R3" },
+            new Row { Action = "RightStickUp", Label = "Right stick up" },
+            new Row { Action = "RightStickRight", Label = "Right stick right" },
+            new Row { Action = "RightStickDown", Label = "Right stick down" },
+            new Row { Action = "RightStickLeft", Label = "Right stick left" },
             new Row { Action = "TouchLeft", Label = "Touchpad (left)" },
         };
 
@@ -142,16 +148,17 @@ namespace RyGT
                 table.Controls.Add(r.Value);
                 r.Bar = new DarkBar { Minimum = 0, Maximum = 1000, Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 10, Margin = new Padding(0, 6, 12, 6) };
                 table.Controls.Add(r.Bar);
+                // The cell holder is always visible, so the table keeps its cell assignment; the
+                // checkbox inside it can come and go. Margins center the 22px checkbox in the 44px row.
+                r.InvertCell = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, Width = 66, Height = 44 };
                 if (r.Analog)
                 {
-                    r.InvertBox = new DarkCheckBox { Text = "Invert", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 3, 0, 0) };
+                    r.InvertBox = new DarkCheckBox { Text = "Invert", AutoSize = true };
+                    r.InvertBox.Top = 11;   // centers the 22px box in the 44px row
                     r.InvertBox.CheckedChanged += delegate { r.Invert = r.InvertBox.Checked; };
-                    table.Controls.Add(r.InvertBox);
+                    r.InvertCell.Controls.Add(r.InvertBox);
                 }
-                else
-                {
-                    table.Controls.Add(new Label { AutoSize = true });
-                }
+                table.Controls.Add(r.InvertCell);
                 var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
                 r.Detect = new Button { Text = "Detect", AutoSize = true };
                 r.Detect.Click += delegate { StartDetect(r); };
@@ -223,7 +230,7 @@ namespace RyGT
             outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            foreach (var row in Rows) { row.Source = null; row.DeviceName = null; row.Invert = false; }
+            foreach (var row in Rows) { row.Source = null; row.DeviceName = null; row.Invert = false; row.OwnedLine = null; row.InvertBox = null; row.InvertCell.Controls.Clear(); }
             LoadSettings();
             foreach (var row in Rows) Show(row);
             Dark.Apply(this);
@@ -380,7 +387,7 @@ namespace RyGT
                 detectUntil = DateTime.Now.AddSeconds(10);
                 status.Text = row.Analog
                     ? "Now " + (row.Action == "Steering" ? "turn the wheel well to the RIGHT" : "press the " + row.Label.ToLowerInvariant() + " all the way") + "..."
-                    : "Now press the button for " + row.Label + "...";
+                    : "Now press the button, move the stick or press the hat for " + row.Label + "...";
             }
         }
 
@@ -422,6 +429,18 @@ namespace RyGT
                         Assign(device, "JOYBUTTON:" + button);
                         return;
                     }
+                    for (int axis = 0; axis < Math.Min(start.Length, device.Axes.Length); ++axis)
+                    {
+                        if (device == Primary() && axis == 0) continue;   // the steering wheel axis
+                        if (Math.Abs(start[axis]) > 30000) continue;       // a pedal: rests at a range end
+                        int moved = device.Axes[axis] - start[axis];
+                        if (Math.Abs(moved) < 20000) continue;
+                        var axisRow = detecting;
+                        Assign(device, "JOYAXIS:" + axis);
+                        axisRow.Invert = moved < 0;
+                        Show(axisRow);
+                        return;
+                    }
                     var hats = baseHats[id];
                     for (int hat = 0; hat < Math.Min(1, device.Hats.Length); ++hat)
                     {
@@ -448,7 +467,7 @@ namespace RyGT
             row.Source = source;
             var primary = Primary();
             row.DeviceName = primary != null && primary.Instance == device.Instance ? null : device.Name;
-            if (row.Analog) row.Invert = false;
+            row.Invert = false;
             Show(row);
             status.Text = row.Label + ": " + Describe(row) + ".";
         }
@@ -473,6 +492,7 @@ namespace RyGT
             if (parts[0] == "JOYAXIS") text = "axis " + parts[1];
             else if (parts[0] == "JOYBUTTON") text = "button " + parts[1];
             else text = "hat " + parts[1].ToLowerInvariant();
+            if (row.Invert && row.Source.StartsWith("JOYAXIS")) text += " (inverted)";
             if (row.DeviceName != null) text += " on " + row.DeviceName;
             return text;
         }
@@ -480,6 +500,21 @@ namespace RyGT
         void Show(Row row)
         {
             row.Value.Text = Describe(row);
+            // The checkbox only shows in rows that can carry an INVERT: the analog rows and any
+            // row bound to a JOYAXIS source.
+            bool wantBox = row.Analog || (row.Source != null && row.Source.StartsWith("JOYAXIS"));
+            if (wantBox && row.InvertBox == null)
+            {
+                row.InvertBox = new DarkCheckBox { Text = "Invert", AutoSize = true, Top = 11 };
+                row.InvertBox.CheckedChanged += delegate { row.Invert = row.InvertBox.Checked; };
+                row.InvertBox.Checked = row.Invert;
+                row.InvertCell.Controls.Add(row.InvertBox);
+            }
+            else if (!wantBox && row.InvertBox != null)
+            {
+                row.InvertCell.Controls.Clear();
+                row.InvertBox = null;
+            }
             if (row.InvertBox != null) row.InvertBox.Checked = row.Invert;
         }
 
@@ -522,6 +557,7 @@ namespace RyGT
                     row.Source = parts[0].Trim().ToUpperInvariant() + ":" + parts[1].Trim().ToUpperInvariant();
                     row.Invert = parts.Length > 2 && parts[2].Trim().ToUpperInvariant() == "INVERT";
                     row.DeviceName = device;
+                    row.OwnedLine = line;
                 }
             }
             var settings = ReadWheelSettings();
@@ -554,33 +590,48 @@ namespace RyGT
             return result;
         }
 
+        static string LineOf(Row row)
+        {
+            var line = row.Action + " = " + row.Source;
+            if (row.Invert && row.Source != null && row.Source.StartsWith("JOYAXIS")) line += ":INVERT";
+            if (row.DeviceName != null) line += " @ " + row.DeviceName;
+            return line;
+        }
+
         void Save()
         {
-            // ryty-input.ini: every non-joystick line stays; the wheel lines are written again.
-            var kept = new List<string>();
-            if (File.Exists(inputPath))
+            // ryty-input.ini: the lines this form loaded are rewritten in place (or removed when
+            // cleared); every other line - actions the form does not know and extra bindings for
+            // the same action - stays as it is.
+            var inputLines = File.Exists(inputPath) ? File.ReadAllLines(inputPath).ToList() : new List<string>();
+            var owned = new HashSet<Row>();
+            for (int i = 0; i < inputLines.Count; ++i)
             {
-                foreach (var line in File.ReadAllLines(inputPath))
+                string source;
+                var action = ActionOf(inputLines[i], out source);
+                var row = action == null ? null : Rows.FirstOrDefault(r => string.Equals(r.Action, action, StringComparison.OrdinalIgnoreCase));
+                if (row != null && row.OwnedLine != null && !owned.Contains(row) && inputLines[i] == row.OwnedLine)
                 {
-                    string source;
-                    ActionOf(line, out source);
-                    if (IsJoystickSource(source)) continue;
-                    if (line.Trim() == "# Racing wheel (written by the RyGT launcher)") continue;
-                    kept.Add(line);
+                    owned.Add(row);
+                    if (row.Source == null) inputLines.RemoveAt(i);
+                    else inputLines[i] = LineOf(row);
                 }
             }
-            while (kept.Count > 0 && kept[kept.Count - 1].Trim().Length == 0) kept.RemoveAt(kept.Count - 1);
-            if (kept.Count > 0) kept.Add("");
-            kept.Add("# Racing wheel (written by the RyGT launcher)");
+            bool appended = false;
             foreach (var row in Rows)
             {
-                if (row.Source == null) continue;
-                var line = row.Action + " = " + row.Source;
-                if (row.Analog && row.Invert) line += ":INVERT";
-                if (row.DeviceName != null) line += " @ " + row.DeviceName;
-                kept.Add(line);
+                if (row.Source == null || owned.Contains(row)) continue;
+                if (!appended)
+                {
+                    inputLines.RemoveAll(l => l.Trim() == "# Racing wheel (written by the RyGT launcher)");
+                    while (inputLines.Count > 0 && inputLines[inputLines.Count - 1].Trim().Length == 0) inputLines.RemoveAt(inputLines.Count - 1);
+                    if (inputLines.Count > 0) inputLines.Add("");
+                    inputLines.Add("# Racing wheel (written by the RyGT launcher)");
+                    appended = true;
+                }
+                inputLines.Add(LineOf(row));
             }
-            File.WriteAllLines(inputPath, kept, new UTF8Encoding(false));
+            File.WriteAllLines(inputPath, inputLines, new UTF8Encoding(false));
 
             // ryty-wheel.ini: the settings edited here are replaced in place; others stay.
             var values = new Dictionary<string, string>

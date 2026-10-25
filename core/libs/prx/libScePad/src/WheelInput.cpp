@@ -72,6 +72,25 @@ void applyStick(Pad::InputControl control, std::array<bool, 4>& negative, std::a
     }
 }
 
+// The stick axis index the control drives (0: left X, 1: left Y, 2: right X, 3: right Y) and
+// whether it names the high (255) end of it (Left/Up name the 0 end).
+constexpr int stickAxisIndex(Pad::InputControl control) {
+    switch (control) {
+        case Pad::InputControl::LeftStickLeft:
+        case Pad::InputControl::LeftStickRight: return 0;
+        case Pad::InputControl::LeftStickUp:
+        case Pad::InputControl::LeftStickDown: return 1;
+        case Pad::InputControl::RightStickLeft:
+        case Pad::InputControl::RightStickRight: return 2;
+        default: return 3;
+    }
+}
+
+constexpr bool stickNamesHighEnd(Pad::InputControl control) {
+    return control == Pad::InputControl::LeftStickRight || control == Pad::InputControl::LeftStickDown ||
+           control == Pad::InputControl::RightStickRight || control == Pad::InputControl::RightStickDown;
+}
+
 }
 
 WheelInput::WheelInput(const Pad::InputConfig& config)
@@ -379,6 +398,18 @@ bool WheelInput::Update() {
                 if (travel > 10000) next.buttons |= static_cast<std::uint32_t>(binding.button);
                 continue;
             }
+            if (Pad::IsStick(binding.control)) {
+                const int delta = value - entry.device->rest[binding.axis];
+                const int travel = binding.invert ? -delta : delta;
+                // Positive travel is towards the end this binding names: the stick axis runs from
+                // 0 (named end) through 128 (rest) to 255 (opposite end), so one line drives the
+                // whole range.
+                const int toward = stickNamesHighEnd(binding.control) ? 128 + travel * 127 / 32767 : 128 - travel * 127 / 32767;
+                const int index = stickAxisIndex(binding.control);
+                if (std::abs(toward - 128) > std::abs(next.stickValues[index] - 128)) next.stickValues[index] = std::clamp(toward, 0, 255);
+                next.analogStick[index] = true;
+                continue;
+            }
             const auto amount = static_cast<std::uint16_t>(std::lround(pedalAmount(value, entry.device->rest[binding.axis], binding.invert) * 65535.0f));
             if (binding.control == Pad::InputControl::Throttle) next.throttle = std::max(next.throttle, amount);
             if (binding.control == Pad::InputControl::Brake) next.brake = std::max(next.brake, amount);
@@ -408,12 +439,14 @@ bool WheelInput::Update() {
 
 void WheelInput::Apply(PadInputState& state) const {
     std::lock_guard lock(sampleMutex);
-    state.buttons |= sample.buttons;
-    for (std::size_t axis = 0; axis < state.sticks.size(); ++axis) {
-        if (sample.negative[axis] || sample.positive[axis]) {
-            state.sticks[axis] = sample.negative[axis] == sample.positive[axis] ? 128 : sample.negative[axis] ? 0 : 255;
+        state.buttons |= sample.buttons;
+        for (std::size_t axis = 0; axis < state.sticks.size(); ++axis) {
+            if (sample.analogStick[axis] && sample.stickValues[axis] != 128) {
+                state.sticks[axis] = static_cast<std::uint8_t>(sample.stickValues[axis]);
+            } else if (sample.negative[axis] || sample.positive[axis]) {
+                state.sticks[axis] = sample.negative[axis] == sample.positive[axis] ? 128 : sample.negative[axis] ? 0 : 255;
+            }
         }
-    }
     state.touchLeft = state.touchLeft || sample.touchLeft;
     state.touchRight = state.touchRight || sample.touchRight;
 }

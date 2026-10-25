@@ -108,6 +108,9 @@ private:
         std::uint16_t clutch = 0;
         std::array<bool, 4> negative{};
         std::array<bool, 4> positive{};
+        // 0..255 per stick axis (128 is neutral), driven by JOYAXIS stick bindings
+        std::array<int, 4> stickValues{128, 128, 128, 128};
+        std::array<bool, 4> analogStick{};
         bool touchLeft = false;
         bool touchRight = false;
 

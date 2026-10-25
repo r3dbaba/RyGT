@@ -53,6 +53,18 @@ inline bool IsDpad(PadButton button) {
     return button == PadButton::Up || button == PadButton::Right || button == PadButton::Down || button == PadButton::Left;
 }
 
+inline bool IsStick(InputControl control) {
+    return control == InputControl::LeftStickLeft || control == InputControl::LeftStickRight ||
+           control == InputControl::LeftStickUp || control == InputControl::LeftStickDown ||
+           control == InputControl::RightStickLeft || control == InputControl::RightStickRight ||
+           control == InputControl::RightStickUp || control == InputControl::RightStickDown;
+}
+
+// An action an axis can point: a dpad direction or a stick direction.
+inline bool IsDirectional(InputControl control, PadButton button) {
+    return IsDpad(button) || IsStick(control);
+}
+
 enum class MouseButton : std::uint8_t {
     None = 0,
     Left = SDL_BUTTON_LEFT,
