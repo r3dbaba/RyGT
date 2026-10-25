@@ -471,6 +471,19 @@ namespace RyGT
 
         protected override void WndProc(ref Message m)
         {
+            // A wheel over a closed box must not cycle its items: give the scroll to the nearest
+            // scrolling ancestor (the window's AutoScroll panel), or drop it when there is none.
+            if (m.Msg == 0x20A && !DroppedDown)
+            {
+                ScrollableControl scroller = Parent as ScrollableControl;
+                while (scroller != null && !scroller.AutoScroll) scroller = scroller.Parent as ScrollableControl;
+                if (scroller != null)
+                {
+                    var p = scroller.PointToClient(PointToScreen(Point.Empty));
+                    SendMessage(scroller.Handle, 0x20A, m.WParam, new IntPtr(((p.Y & 0xFFFF) << 16) | (p.X & 0xFFFF)));
+                }
+                return;
+            }
             base.WndProc(ref m);
             if (m.Msg != 0xF || !IsHandleCreated) return; // WM_PAINT
             using (var g = Graphics.FromHwnd(Handle))
@@ -497,6 +510,9 @@ namespace RyGT
                 }
             }
         }
+
+        [DllImport("user32.dll")]
+        static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
     }
 
     /// A rounded panel with a thin border; the controls on it take its color.
