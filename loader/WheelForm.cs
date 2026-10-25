@@ -39,11 +39,13 @@ namespace RyGT
             public string DeviceName;    // null: the wheel
             public string OwnedLine;     // the ini line loaded into this row; null: no line
             public bool Invert;
-            public Label Value;
+            public DecoLabel Name;
+            public DecoLabel Value;
             public DarkBar Bar;
             public Control InvertCell;   // always-visible cell holder; the invisible checkbox does not take a table cell
-            public CheckBox InvertBox;
+            public DarkCheckBox InvertBox;
             public Button Detect;
+            public FlowLayoutPanel Flow;
         }
 
         static readonly Row[] Rows =
@@ -75,7 +77,9 @@ namespace RyGT
         };
 
         readonly string inputPath, wheelPath, probePath;
+        readonly TableLayoutPanel grid;
         readonly Dictionary<int, Device> devices = new Dictionary<int, Device>();
+        int hoverRow = -1;
         readonly List<int> deviceOrder = new List<int>();
         readonly object gate = new object();
         readonly Label status, deviceList, rawInput;
@@ -130,12 +134,16 @@ namespace RyGT
             rawInput = new Label { AutoSize = true, MaximumSize = new Size(740, 0), ForeColor = Dark.DimText, Margin = new Padding(0, 0, 0, 6), Font = new Font("Consolas", 8.5f) };
             outer.Controls.Add(rawInput);
 
-            var table = new TableLayoutPanel { ColumnCount = 5, AutoSize = true, Dock = DockStyle.Top, Margin = new Padding(0) };
+            var table = new DecoratedTable { ColumnCount = 5 };
+            table.AutoSize = true;
+            table.Dock = DockStyle.Top;
+            table.Margin = new Padding(0);
+            grid = table;
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 168));
             foreach (var heading in new[] { "Control", "Mapped to", "Live", "", "" })
             {
                 table.Controls.Add(new Label { Text = heading.ToUpperInvariant(), AutoSize = true, Font = new Font("Segoe UI Semibold", 8.5f), ForeColor = Dark.Heading, Tag = "heading", Margin = new Padding(0, 0, 0, 4) });
@@ -143,23 +151,33 @@ namespace RyGT
             foreach (var row in Rows)
             {
                 var r = row;
-                table.Controls.Add(new Label { Text = r.Label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 6, 0) });
-                r.Value = new Label { AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 6, 0) };
+                int k = Array.IndexOf(Rows, row);
+                var name = new DecoLabel { Text = r.Label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 6, 0) };
+                name.Decorate = RowDecorate(name, k, false);
+                r.Name = name;
+                table.Controls.Add(name);
+                r.Value = new DecoLabel { AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 6, 0) };
+                r.Value.Decorate = RowDecorate(r.Value, k, false);
                 table.Controls.Add(r.Value);
                 r.Bar = new DarkBar { Minimum = 0, Maximum = 1000, Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 10, Margin = new Padding(0, 6, 12, 6) };
                 table.Controls.Add(r.Bar);
                 // The cell holder is always visible, so the table keeps its cell assignment; the
                 // checkbox inside it can come and go. Margins center the 22px checkbox in the 44px row.
-                r.InvertCell = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, Width = 66, Height = 44 };
+                var invertCell = new DecoPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, Width = 66, Height = 44 };
+                invertCell.Decorate = RowDecorate(invertCell, k, true);
+                r.InvertCell = invertCell;
                 if (r.Analog)
                 {
                     r.InvertBox = new DarkCheckBox { Text = "Invert", AutoSize = true };
                     r.InvertBox.Top = 11;   // centers the 22px box in the 44px row
+                    r.InvertBox.Background = RowDecorate(r.InvertBox, k, false);
                     r.InvertBox.CheckedChanged += delegate { r.Invert = r.InvertBox.Checked; };
                     r.InvertCell.Controls.Add(r.InvertBox);
                 }
                 table.Controls.Add(r.InvertCell);
-                var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+                var buttons = new DecoFlow { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+                buttons.Decorate = RowDecorate(buttons, k, true);
+                r.Flow = buttons;
                 r.Detect = new Button { Text = "Detect", AutoSize = true };
                 r.Detect.Click += delegate { StartDetect(r); };
                 var clear = new Button { Text = "Clear", AutoSize = true };
@@ -168,12 +186,33 @@ namespace RyGT
                 buttons.Controls.Add(clear);
                 table.Controls.Add(buttons);
             }
-            var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Margin = new Padding(0) };
+            var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Margin = new Padding(0), Padding = new Padding(0, 0, 12, 0) };
             scroll.Controls.Add(table);
             var mapping = new Card(Dark.Panel) { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 6, 10), Margin = new Padding(0, 6, 0, 10) };
             mapping.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             mapping.Controls.Add(scroll);
             outer.Controls.Add(mapping);
+
+            // Faint row separators, a theme border where a control group begins, and a hover band
+            // on the row under the mouse. Painted as the table's background so the transparent
+            // row controls show it through instead of covering it.
+            table.Decorate = delegate (Graphics g)
+            {
+                if (hoverRow >= 0)
+                {
+                    int top = Rows[hoverRow].Flow.Top;
+                    int rowBottom = hoverRow + 1 < Rows.Length ? Rows[hoverRow + 1].Flow.Top : top + Rows[hoverRow].Flow.Height;
+                    using (var band = new SolidBrush(Dark.Hover)) g.FillRectangle(band, 0, top, table.Width, rowBottom - top);
+                }
+                using (var faint = new Pen(Color.FromArgb(34, 34, 34), 1))
+                using (var border = new Pen(Dark.Border, 1))
+                    for (int k = 0; k < Rows.Length; ++k)
+                    {
+                        bool group = k == 0 || k == 1 || k == 4 || k == 6 || k == 11 || k == 15 || k == 19 || k == 23;
+                        g.DrawLine(group ? border : faint, 0, Rows[k].Flow.Top, table.Width, Rows[k].Flow.Top);
+                    }
+            };
+            Application.AddMessageFilter(new HoverFilter(this, table));
 
             var settings = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
             settings.Controls.Add(new Label { Text = "Wheel rotation (degrees, as set in your wheel's software)", AutoSize = true, Margin = new Padding(0, 6, 8, 0) });
@@ -506,6 +545,7 @@ namespace RyGT
             if (wantBox && row.InvertBox == null)
             {
                 row.InvertBox = new DarkCheckBox { Text = "Invert", AutoSize = true, Top = 11 };
+                row.InvertBox.Background = RowDecorate(row.InvertBox, Array.IndexOf(Rows, row), false);
                 row.InvertBox.CheckedChanged += delegate { row.Invert = row.InvertBox.Checked; };
                 row.InvertBox.Checked = row.Invert;
                 row.InvertCell.Controls.Add(row.InvertBox);
@@ -516,6 +556,120 @@ namespace RyGT
                 row.InvertBox = null;
             }
             if (row.InvertBox != null) row.InvertBox.Checked = row.Invert;
+        }
+
+        public void SetHover(int k)
+        {
+            if (k == hoverRow) return;
+            int old = hoverRow;
+            hoverRow = k;
+            grid.Invalidate();
+            InvalidateRow(old);
+            InvalidateRow(k);
+        }
+
+        // A parent's invalidation does not reach its children; the band lives in theirs too.
+        void InvalidateRow(int k)
+        {
+            if (k < 0 || k >= Rows.Length) return;
+            var r = Rows[k];
+            r.Name.Invalidate();
+            r.Value.Invalidate();
+            r.Bar.Invalidate();
+            r.InvertCell.Invalidate();
+            r.Flow.Invalidate();
+            if (r.InvertBox != null) r.InvertBox.Invalidate();
+        }
+
+        public int RowAt(int y)
+        {
+            for (int k = Rows.Length - 1; k >= 0; --k)
+                if (y >= Rows[k].Flow.Top) return k;
+            return -1;
+        }
+
+        readonly Pen faintLine = new Pen(Color.FromArgb(34, 34, 34), 1);
+        readonly Pen groupLine = new Pen(Dark.Border, 1);
+
+        /// The hover band and (for the full-height cells) the row line, drawn in the control's
+        /// own background so the decoration is not covered by the control.
+        Action<Graphics> RowDecorate(Control cell, int k, bool line)
+        {
+            bool group = k == 0 || k == 1 || k == 4 || k == 6 || k == 11 || k == 15 || k == 19 || k == 23;
+            var pen = line ? (group ? groupLine : faintLine) : null;
+            return delegate (Graphics g)
+            {
+                if (hoverRow == k)
+                    using (var band = new SolidBrush(Dark.Hover)) g.FillRectangle(band, 0, 0, cell.Width, cell.Height);
+                if (pen != null) g.DrawLine(pen, 0, 0, cell.Width, 0);
+            };
+        }
+
+        /// The mapping grid: paints its own background, because the row controls copy a flat
+        /// ancestor color and would cover anything the grid painted.
+        class DecoratedTable : TableLayoutPanel
+        {
+            public Action<Graphics> Decorate;
+
+            public DecoratedTable()
+            {
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+                BackColor = Color.FromArgb(26, 26, 26);
+            }
+
+            protected override void OnPaintBackground(PaintEventArgs e)
+            {
+                base.OnPaintBackground(e);
+                if (Decorate != null) Decorate(e.Graphics);
+            }
+        }
+
+        /// Row controls that carry the row's decoration (hover band, row line) in their own
+        /// background, so it continues unbroken through them.
+        class DecoLabel : Label
+        {
+            public Action<Graphics> Decorate;
+            protected override void OnPaintBackground(PaintEventArgs e)
+            {
+                base.OnPaintBackground(e);
+                if (Decorate != null) Decorate(e.Graphics);
+            }
+        }
+
+        class DecoPanel : Panel
+        {
+            public Action<Graphics> Decorate;
+            protected override void OnPaintBackground(PaintEventArgs e)
+            {
+                base.OnPaintBackground(e);
+                if (Decorate != null) Decorate(e.Graphics);
+            }
+        }
+
+        class DecoFlow : FlowLayoutPanel
+        {
+            public Action<Graphics> Decorate;
+            protected override void OnPaintBackground(PaintEventArgs e)
+            {
+                base.OnPaintBackground(e);
+                if (Decorate != null) Decorate(e.Graphics);
+            }
+        }
+
+        /// Tracks the mouse over the grid and highlights the row under it.
+        class HoverFilter : IMessageFilter
+        {
+            readonly WheelForm form;
+            readonly TableLayoutPanel table;
+            public HoverFilter(WheelForm form, TableLayoutPanel table) { this.form = form; this.table = table; }
+            public bool PreFilterMessage(ref Message m)
+            {
+                if (m.Msg != 0x0200 || !form.Visible || !form.IsHandleCreated) return false;   // WM_MOUSEMOVE
+                var p = table.PointToClient(Control.MousePosition);
+                int k = p.X >= 0 && p.X <= table.Width && p.Y >= 0 && p.Y <= table.Height ? form.RowAt(p.Y) : -1;
+                form.SetHover(k);
+                return false;
+            }
         }
 
         // ---------------------------------------------------------------- files

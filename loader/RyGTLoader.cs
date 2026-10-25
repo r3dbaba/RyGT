@@ -396,6 +396,9 @@ namespace RyGT
     /// A check box drawn in the loader's colors: a dark rounded square, red with a white tick when checked.
     class DarkCheckBox : CheckBox
     {
+        /// Drawn over the backdrop, before the box.
+        public Action<Graphics> Background;
+
         public DarkCheckBox()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
@@ -413,6 +416,7 @@ namespace RyGT
         protected override void OnPaintBackground(PaintEventArgs e)
         {
             Dark.PaintUnder(this, e.Graphics);
+            if (Background != null) Background(e.Graphics);
         }
 
         protected override void OnPaint(PaintEventArgs e)
