@@ -194,6 +194,13 @@ void WheelInput::close(SDL_JoystickID instanceId) {
 }
 
 WheelInput::Device* WheelInput::primary() const {
+    // When multiple devices share the same vendor and product. E.g.
+    // - a wheel maker's pedals and shifters
+    // - some Fanatec bases that shows up twice
+    // pick the right one by haptics.
+    for (const auto& device : devices) {
+        if (device->wheel && device->haptic != nullptr) return device.get();
+    }
     for (const auto& device : devices) {
         if (device->wheel) return device.get();
     }
